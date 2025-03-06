@@ -49,9 +49,6 @@ class Player():
     def queue(self, value: list) -> None:
         self._data["queue"] = value
 
-
-
-
     async def stream_track(self, interaction: discord.Interaction, song: Song, voice_client: discord.VoiceClient) -> None:
         ''' Streams a track from the Subsonic server to a connected voice channel, and updates guild data accordingly '''
 

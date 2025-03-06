@@ -70,6 +70,11 @@ class SysMsg:
         await __class__.msg(interaction, f"{interaction.user.display_name} added track to queue", desc)
 
     @staticmethod
+    async def added_album_to_queue(interaction: discord.Interaction, album:subsonic.Album) -> None:
+        desc = f"**{album.name}**\n{album.artist}({album.song_count} tracks, {album.duration_printable})"
+        await __class__.msg(interaction, f"{interaction.user.display_name} added album to queue", desc)
+
+    @staticmethod
     async def queue_cleared(interaction: discord.Interaction) -> None:
         ''' Sends a message indicating a user cleared the queue '''
         await __class__.msg(interaction, f"{interaction.user.display_name} cleared the queue")
@@ -164,6 +169,38 @@ def parse_search_as_track_selection_options(results: list[subsonic.Song]) -> lis
     select_options = []
     for i, song in enumerate(results):
         select_option = discord.SelectOption(label=f"{song.title}", description=f"by {song.artist}", value=i)
+        select_options.append(select_option)
+
+    return select_options
+
+# Methods for parsing data to Discord structures
+def parse_album_search_as_track_selection_embed(results: list[subsonic.Album], query: str, page_num: int) -> discord.Embed:
+    ''' Takes search results obtained from the Subsonic API and parses them into a Discord embed suitable for track selection '''
+
+    options_str = ""
+
+    # Loop over the provided search results
+    for album in results:
+
+        a_name = album.name
+        a_artist = album.artist
+
+        # Add each of the results to our output string
+        options_str += f"**{a_name}**\n*{a_artist}* ({album.song_count} tracks, {album.duration_printable})\n\n"
+
+    # Add the current page number to our results
+    options_str += f"Current page: {page_num}"
+
+    # Return an embed that displays our output string
+    return discord.Embed(color=discord.Color.orange(), title=f"Results for: {query}", description=options_str)
+
+
+def parse_album_search_as_track_selection_options(results: list[subsonic.Album]) -> list[discord.SelectOption]:
+    ''' Takes search results obtained from the Subsonic API and parses them into a Discord selection list for tracks '''
+
+    select_options = []
+    for i, album in enumerate(results):
+        select_option = discord.SelectOption(label=f"{album.name}", description=f"by {album.artist}", value=i)
         select_options.append(select_option)
 
     return select_options
