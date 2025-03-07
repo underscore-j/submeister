@@ -8,6 +8,8 @@ from pathlib import Path
 
 from util import env
 
+from typing import Union
+
 logger = logging.getLogger(__name__)
 
 
@@ -44,8 +46,8 @@ class Album():
     def artist(self) -> str:
         ''' The album's artist '''
         return self._artist
-    @property
 
+    @property
     def cover_id(self) -> str:
         ''' The id of the cover art used by the album '''
         return self._cover_id
@@ -63,6 +65,34 @@ class Album():
     def duration_printable(self) -> str:
         ''' The total duration of the album as a human-readable string in `mm:ss` format '''
         return f"{(self._duration // 60):02d}:{(self._duration % 60):02d}"
+
+class Artist():
+    ''' Object representing an album returned from the Subsonic API '''
+    def __init__(self, json_object: dict) -> None:
+        self._id: str = json_object["id"] if "id" in json_object else ""
+        self._name: str = json_object["name"] if "name" in json_object else "Unknown Artist"
+        self._cover_id: str = json_object["coverArt"] if "coverArt" in json_object else ""
+        self._album_count: int = json_object["albumCount"] if "albumCount" in json_object else 0
+
+    @property
+    def artist_id(self) -> str:
+        ''' The artist's id '''
+        return self._id
+
+    @property
+    def name(self) -> str:
+        ''' The artist's name '''
+        return self._name
+
+    @property
+    def cover_id(self) -> str:
+        ''' The id of the cover art used for the artist '''
+        return self._cover_id
+
+    @property
+    def album_count(self) -> int:
+        ''' The number of albums by this artist '''
+        return self._album_count
 
 class Song():
     ''' Object representing a song returned from the Subsonic API '''
@@ -149,7 +179,7 @@ def check_subsonic_error(response: requests.Response) -> bool:
     logger.warning("Subsonic API request responded with error code %s: %s", err_code, err_msg)
     return True
 
-def search(query: str, *, artist_count: int=20, artist_offset: int=0, album_count: int=20, album_offset: int=0, song_count: int=20, song_offset: int=0) -> list[Union[Song, Album]]:
+def search(query: str, *, artist_count: int=20, artist_offset: int=0, album_count: int=20, album_offset: int=0, song_count: int=20, song_offset: int=0) -> list[Union[Song, Album, Artist]]:
     ''' Send a search request to the subsonic API '''
 
     # Sanitize special characters in the user's query
@@ -170,13 +200,15 @@ def search(query: str, *, artist_count: int=20, artist_offset: int=0, album_coun
     response = requests.get(f"{env.SUBSONIC_SERVER}/rest/search3.view", params=params, timeout=20)
     search_data = response.json()
 
-    results : list[Union[Song, Album]]= []
+    results : list[Union[Song, Album, Artist]]= []
 
     try:
-        for item in search_data["subsonic-response"]["searchResult3"]["song"] if "song" in search_data["subsonic-response"]["searchResult3"] else []:
-            results.append(Song(item))
+        for item in search_data["subsonic-response"]["searchResult3"]["artist"] if "artist" in search_data["subsonic-response"]["searchResult3"] else []:
+            results.append(Artist(item))
         for item in search_data["subsonic-response"]["searchResult3"]["album"] if "album" in search_data["subsonic-response"]["searchResult3"] else []:
             results.append(Album(item))
+        for item in search_data["subsonic-response"]["searchResult3"]["song"] if "song" in search_data["subsonic-response"]["searchResult3"] else []:
+            results.append(Song(item))
     except KeyError:
         return []
 
@@ -269,6 +301,20 @@ def get_album_songs(album: Album) -> list[Song]:
     results: list[Song] = []
     for item in album_data["subsonic-response"]["album"]["song"]:
         results.append(Song(item))
+    return results
+
+def get_artist_albums(artist: Artist) -> list[Album]:
+    ''' Request the albums of an artist from the subsonic API '''
+    params = {
+        "id": artist.artist_id
+    }
+    params = SUBSONIC_REQUEST_PARAMS | params
+    response = requests.get(f"{env.SUBSONIC_SERVER}/rest/getArtist", params=params, timeout=20)
+    artist_data = response.json()
+
+    results: list[Album] = []
+    for item in artist_data["subsonic-response"]["artist"]["album"]:
+        results.append(Album(item))
     return results
 
 def stream(stream_id: str):

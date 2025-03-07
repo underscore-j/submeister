@@ -11,6 +11,8 @@ import player
 import subsonic
 import ui
 
+from typing import Union
+
 from submeister import SubmeisterClient
 
 logger = logging.getLogger(__name__)
@@ -84,181 +86,189 @@ class MusicCog(commands.Cog):
         await ui.SysMsg.added_to_queue(interaction, songs[0])
         await player.play_audio_queue(interaction, voice_client)
 
+    class SelectionHandler:
+        ''' A callable to implement the callback across all three song selection UI types '''
+        def __init__(self, selection: list[Union[subsonic.Song, subsonic.Album, subsonic.Artist]], selector: discord.ui.Select, owner):
+            self._items = selection
+            self._selector = selector
+            self._owner = owner
 
-    @app_commands.command(name="search", description="Search for a track")
-    @app_commands.describe(query="Enter a search query")
-    async def search(self, interaction: discord.Interaction, query: str) -> None:
-        ''' Search for tracks by the given title/artist & list them '''
+        async def __call__(self, interaction: discord.Interaction) -> None:
+            item = self._items[int(self._selector.values[0])]
 
-        # The number of songs to retrieve and the offset to start at
-        song_count = 10 # TODO: Make this user-adjustable
-        song_offset = 0
+            if isinstance(item, subsonic.Song):
+                # Song selected: Queue it
+                voice_client = await self._owner.get_voice_client(interaction)
 
-        # Send our query to the subsonic API and retrieve a list of songs
-        songs = subsonic.search(query, artist_count=0, album_count=0, song_count=song_count, song_offset=song_offset)
+                # Don't allow users who aren't in a voice channel with the bot to queue tracks
+                if voice_client is not None and interaction.user.status is None:
+                    return await ui.ErrMsg.user_not_in_voice_channel(interaction)
 
-        # Display an error if the query returned no results
+                # Get the guild's player
+                player = data.guild_data(interaction.guild_id).player
+
+                # Add the selected song to the queue
+                player.queue.append(item)
+
+                # Let the user know a track has been added to the queue
+                await ui.SysMsg.added_to_queue(interaction, item)
+
+                # Fetch the cover art in advance
+                subsonic.get_album_art_file(item.cover_id)
+
+                # Attempt to play the audio queue, if the bot is in the voice channel
+                if voice_client is not None:
+                    await player.play_audio_queue(interaction, voice_client)
+                
+            if isinstance(item, subsonic.Album):
+                # Album selected: launch album UI
+                await self._owner.album_ui(interaction, item)
+            if isinstance(item, subsonic.Artist):
+                # Artist selected: launch artist UI
+                await self._owner.artist_ui(interaction, item)
+
+
+    async def album_ui(self, interaction: discord.Interaction, album: subsonic.Album) -> None:
+        ''' Album UI: lists an album's tracks, and alllows queueing them all '''
+        songs = subsonic.get_album_songs(album)
+
+        # Dispaly an error if we obtain no results
         if len(songs) == 0:
-            await ui.ErrMsg.msg(interaction, f"No results found for **{query}**.")
+            await ui.ErrMsg.msg(interaction, f"No tracks found for album **{album.name}")
             return
 
         # Create a view for our response
         view = discord.ui.View()
 
         # Create a select menu option for each of our results
-        select_options = ui.parse_search_as_track_selection_options(songs)
+        select_options = ui.parse_subsonic_items_as_selection_options(songs)
 
         # Create a select menu, populated with our options
         song_selector = discord.ui.Select(placeholder="Select a track", options=select_options)
         view.add_item(song_selector)
+        
+        # Instantiate a selection handler for this selection
+        song_selector.callback = self.SelectionHandler(songs, song_selector, self)
 
+        # Add a button to queue all songs at once
+        play_all_button = discord.ui.Button(label="Play All", style=discord.ButtonStyle.primary, custom_id="play_all_button")
+        view.add_item(play_all_button)
 
-        # Callback to handle interaction with a select item
-        async def song_selected(interaction: discord.Interaction) -> None:
+        # Add a handler for this button
+        async def play_all(interaction: discord.Interaction) -> None:
             voice_client = await self.get_voice_client(interaction)
 
             # Don't allow users who aren't in a voice channel with the bot to queue tracks
             if voice_client is not None and interaction.user.status is None:
                 return await ui.ErrMsg.user_not_in_voice_channel(interaction)
-
-            # Get the song selected by the user
-            selected_song = songs[int(song_selector.values[0])]
-
-            # Get the guild's player
-            player = data.guild_data(interaction.guild_id).player
-
-            # Add the selected song to the queue
-            player.queue.append(selected_song)
-
-            # Let the user know a track has been added to the queue
-            await ui.SysMsg.added_to_queue(interaction, selected_song)
-
-            # Fetch the cover art in advance
-            subsonic.get_album_art_file(selected_song.cover_id)
-
-            # Attempt to play the audio queue, if the bot is in the voice channel
-            if voice_client is not None:
-                await player.play_audio_queue(interaction, voice_client)
-
-
-        # Assign the song_selected callback to the select menu
-        song_selector.callback = song_selected
-
-        # Create page navigation buttons
-        prev_button = discord.ui.Button(label="<", custom_id="prev_button")
-        next_button = discord.ui.Button(label=">", custom_id="next_button")
-        view.add_item(prev_button)
-        view.add_item(next_button)
-
-
-        # Callback to handle interactions with page navigator buttons
-        async def page_changed(interaction: discord.Interaction) -> None:
-            nonlocal song_count, song_offset, song_selector, song_selected, songs
-
-            # Adjust the search offset according to the button pressed
-            if interaction.data["custom_id"] == "prev_button":
-                song_offset -= song_count
-                if song_offset < 0:
-                    song_offset = 0
-                    await interaction.response.defer()
-                    return
-            elif interaction.data["custom_id"] == "next_button":
-                song_offset += song_count
-
-            # Send our query to the Subsonic API and retrieve a list of songs, backing up the previous page's songs first
-            songs_lastpage = songs
-            songs = subsonic.search(query, artist_count=0, album_count=0, song_count=song_count, song_offset=song_offset)
-
-            # If there are no results on this page, go back one page and don't update the response
-            if len(songs) == 0:
-                song_offset -= song_count
-                songs = songs_lastpage
-                await interaction.response.defer()
-                return
-
-            # Generate a new embed containing this page's search results
-            song_list = ui.parse_search_as_track_selection_embed(songs, query, (song_offset // song_count) + 1)
-
-            # Create a selection menu, populated with our new options
-            select_options = ui.parse_search_as_track_selection_options(songs)
-
-            # Update the selector in the existing view
-            view.remove_item(song_selector)
-            song_selector = discord.ui.Select(placeholder="Select a track", options=select_options)
-            song_selector.callback = song_selected
-            view.add_item(song_selector)
-
-            # Update the message to show the new search results
-            await interaction.response.edit_message(embed=song_list, view=view)
-
-
-        # Assign the page_changed callback to the page navigation buttons
-        prev_button.callback = page_changed
-        next_button.callback = page_changed
-
-        # Generate a formatted embed for the current search results
-        song_list = ui.parse_search_as_track_selection_embed(songs, query, (song_offset // song_count) + 1)
-
-        # Show our song selection menu
-        await interaction.response.send_message(embed=song_list, view=view, ephemeral=True)
-
-    @app_commands.command(name="search-album", description="Search for an album (to queue in its entirety)")
-    async def search_album(self, interaction:discord.Interaction, query: str) -> None:
-        ''' Search for albums & list them '''
-
-        # The number of results to retrieve and the offset to start at
-        result_count = 10
-        result_offset = 0
-
-        # Send our query to the subsonic API
-        results = subsonic.search(query, artist_count=0, album_count=result_count, song_count=0, album_offset=result_offset)
-
-        # Send an error if the query returned no results
-        if len(results) == 0:
-            await ui.ErrMsg.msg(interaction, f"No results for **{query}**.")
-            return
-
-        # Create a view for our response
-        view = discord.ui.View()
-        
-        #Create a select menu option for each of our results
-        select_options = ui.parse_album_search_as_track_selection_options(results)
-
-        #Create a select monu, populated with the options
-        album_selector = discord.ui.Select(placeholder="Select an album", options = select_options)
-        view.add_item(album_selector)
-        
-        # Callback to handle interaction with a select item
-        async def album_selected(interaction: discord.Interaction) -> None:
-            voice_client = await self.get_voice_client(interaction)
-
-            # Don't allow users who aren't in a voice channel with the bot to queue tracks
-            if voice_client is not None and interaction.user.status is None:
-                return await ui.ErrMsg.user_not_in_voice_channel(interaction)
-
-            # Get the song selected by the user
-            selected_album = results[int(album_selector.values[0])]
 
             # Get the guild's player
             player = data.guild_data(interaction.guild_id).player
 
             # Add the selected album to the queue
-            for song in subsonic.get_album_songs(selected_album):
+            for song in songs:
                 player.queue.append(song)
 
             # Let the user know a track has been added to the queue
-            await ui.SysMsg.added_album_to_queue(interaction, selected_album)
+            await ui.SysMsg.added_album_to_queue(interaction, album)
 
             # Fetch the cover art in advance
-            subsonic.get_album_art_file(selected_album.cover_id)
+            subsonic.get_album_art_file(album.cover_id)
 
             # Attempt to play the audio queue, if the bot is in the voice channel
             if voice_client is not None:
                 await player.play_audio_queue(interaction, voice_client)
 
+        play_all_button.callback = play_all
 
-        # Assign the song_selected callback to the select menu
-        album_selector.callback = album_selected
+        # Generate a formatted embed for the current search results
+        song_list = ui.parse_subsonic_items_as_selection_embed(songs, f"{album.artist} - **{album.name}**", "")
+
+        # Show our song selection menu
+        await interaction.response.send_message(embed=song_list, view=view, ephemeral=True)
+
+    async def artist_ui(self, interaction: discord.Interaction, artist: subsonic.Artist) -> None:
+        ''' Artist UI: lists an artist's albums, and allows queueing all their tracks '''
+        albums = subsonic.get_artist_albums(artist)
+
+        # Dispaly an error if we obtain no results
+        if len(albums) == 0:
+            await ui.ErrMsg.msg(interaction, f"No albums found for artist **{artist.name}")
+            return
+
+        # Create a view for our response
+        view = discord.ui.View()
+
+        # Create a select menu option for each of our results
+        select_options = ui.parse_subsonic_items_as_selection_options(albums)
+
+        # Create a select menu, populated with our options
+        album_selector = discord.ui.Select(placeholder="Select an album", options=select_options)
+        view.add_item(album_selector)
+        
+        # Instantiate a selection handler for this selection
+        album_selector.callback = self.SelectionHandler(albums, album_selector, self)
+
+        # Add a button to queue all albums at once
+        play_all_button = discord.ui.Button(label="Play All", style=discord.ButtonStyle.primary, custom_id="play_all_button")
+        view.add_item(play_all_button)
+
+        # Add a handler for this button
+        async def play_all(interaction: discord.Interaction) -> None:
+            voice_client = await self.get_voice_client(interaction)
+
+            # Don't allow users who aren't in a voice channel with the bot to queue tracks
+            if voice_client is not None and interaction.user.status is None:
+                return await ui.ErrMsg.user_not_in_voice_channel(interaction)
+
+            # Get the guild's player
+            player = data.guild_data(interaction.guild_id).player
+
+            # Add all albums to the queue
+            for album in albums:
+                for song in subsonic.get_album_songs(album):
+                    player.queue.append(song)
+                await ui.SysMsg.added_album_to_queue(interaction, album)
+                subsonic.get_album_art_file(album.cover_id)
+
+            # Attempt to play the audio queue, if the bot is in the voice channel
+            if voice_client is not None:
+                await player.play_audio_queue(interaction, voice_client)
+
+        play_all_button.callback = play_all
+
+        # Generate a formatted embed for the current search results
+        album_list = ui.parse_subsonic_items_as_selection_embed(albums, f"**{artist.name}**", "")
+
+        # Show our album selection menu
+        await interaction.response.send_message(embed=album_list, view=view, ephemeral=True)
+
+    async def search_ui(self, interaction: discord.Interaction, query: str, header: str, max_artists = None, max_albums = None, max_songs = None) -> None:
+        ''' Generic Search UI to implement search for Songs, Albums or Artists or mixed results '''
+        max_results = 10
+        artists_seen = 0
+        albums_seen = 0
+        songs_seen = 0
+
+        # Compute how many of each type of result to obtain
+        max_artist_results = max_results if max_artists is None else min(max_results, max(0, max_artists - artists_seen))
+        max_album_results = max_results if max_albums is None else min(max_results, max(0, max_albums - albums_seen))
+        max_song_results = max_results if max_songs is None else min(max_results, max(0, max_songs - songs_seen))
+        
+        # Query subsonic
+        results = subsonic.search(query, artist_count = max_artist_results, artist_offset = artists_seen, album_count = max_album_results, album_offset = albums_seen, song_count = max_song_results, song_offset = songs_seen)[:max_results]
+
+        # Create a view for our response
+        view = discord.ui.View()
+
+        # Create a select menu option for each of our results
+        select_options = ui.parse_subsonic_items_as_selection_options(results)
+
+        # Create a select menu, populated with our options
+        result_selector = discord.ui.Select(placeholder="Select a result", options=select_options)
+        view.add_item(result_selector)
+
+        result_selector.callback = self.SelectionHandler(results, result_selector, self)
 
         # Create page navigation buttons
         prev_button = discord.ui.Button(label="<", custom_id="prev_button")
@@ -266,46 +276,62 @@ class MusicCog(commands.Cog):
         view.add_item(prev_button)
         view.add_item(next_button)
 
-
         # Callback to handle interactions with page navigator buttons
         async def page_changed(interaction: discord.Interaction) -> None:
-            nonlocal result_count, result_offset, album_selector, album_selected, results
+            nonlocal max_results, artists_seen, albums_seen, songs_seen, results, result_selector
+
+            # Determine by how much to adjust the "seen" amounts
+            artists_in_result = len([e for e in results if isinstance(e, subsonic.Artist)])
+            albums_in_result = len([e for e in results if isinstance(e, subsonic.Album)])
+            songs_in_result = len([e for e in results if isinstance(e, subsonic.Song)])
 
             # Adjust the search offset according to the button pressed
             if interaction.data["custom_id"] == "prev_button":
-                result_offset -= result_count
-                if result_offset < 0:
-                    result_offset = 0
+                if artists_seen <= 0 and albums_seen <= 0 and songs_seen <= 0:
                     await interaction.response.defer()
                     return
+                artists_seen -= artists_in_result
+                albums_seen -= albums_in_result
+                songs_seen -= songs_in_result
             elif interaction.data["custom_id"] == "next_button":
-                result_offset += result_count
+                artists_seen += artists_in_result
+                albums_seen += albums_in_result
+                songs_seen += songs_in_result
 
-            # Send our query to the Subsonic API and retrieve a list of songs, backing up the previous page's songs first
+            # Back up previous results before making a new query
             results_lastpage = results
-            results = subsonic.search(query, artist_count=0, album_count=result_count, song_count=0, album_offset=result_offset)
+
+            # Compute how many of each type of result to obtain
+            max_artist_results = max_results if max_artists is None else min(max_results, max(0, max_artists - artists_seen))
+            max_album_results = max_results if max_albums is None else min(max_results, max(0, max_albums - albums_seen))
+            max_song_results = max_results if max_songs is None else min(max_results, max(0, max_songs - songs_seen))
+            
+            # Query subsonic
+            results = subsonic.search(query, artist_count = max_artist_results, artist_offset = artists_seen, album_count = max_album_results, album_offset = albums_seen, song_count = max_song_results, song_offset = songs_seen)[:max_results]
 
             # If there are no results on this page, go back one page and don't update the response
             if len(results) == 0:
-                result_offset -= result_count
+                artists_seen -= artists_in_result
+                albums_seen -= albums_in_result
+                songs_seen -= songs_in_result
                 results = results_lastpage
                 await interaction.response.defer()
                 return
 
             # Generate a new embed containing this page's search results
-            album_list = ui.parse_album_search_as_track_selection_embed(results, query, (results_offset // result_count) + 1)
+            result_list = ui.parse_subsonic_items_as_selection_embed(results, header, f"Page: {((artists_seen + albums_seen + songs_seen) // max_results) + 1}")
 
             # Create a selection menu, populated with our new options
-            select_options = ui.parse_album_search_as_track_selection_options(results)
+            select_options = ui.parse_subsonic_items_as_selection_options(results)
 
             # Update the selector in the existing view
-            view.remove_item(song_selector)
-            album_selector = discord.ui.Select(placeholder="Select an album", options=select_options)
-            album_selector.callback = album_selected
-            view.add_item(album_selector)
+            view.remove_item(result_selector)
+            result_selector = discord.ui.Select(placeholder="Select a result", options=select_options)
+            result_selector.callback = self.SelectionHandler(results, result_selector, self)
+            view.add_item(result_selector)
 
             # Update the message to show the new search results
-            await interaction.response.edit_message(embed=album_list, view=view)
+            await interaction.response.edit_message(embed=result_list, view=view)
 
 
         # Assign the page_changed callback to the page navigation buttons
@@ -313,10 +339,36 @@ class MusicCog(commands.Cog):
         next_button.callback = page_changed
 
         # Generate a formatted embed for the current search results
-        album_list = ui.parse_album_search_as_track_selection_embed(results, query, (result_offset // result_count) + 1)
+        result_list = ui.parse_subsonic_items_as_selection_embed(results, header, f"Page: {((artists_seen + albums_seen + songs_seen) // max_results) + 1}")
 
         # Show our song selection menu
-        await interaction.response.send_message(embed=album_list, view=view, ephemeral=True)
+        await interaction.response.send_message(embed=result_list, view=view, ephemeral=True)
+
+
+
+    @app_commands.command(name="search", description="Search for a track, album or artist")
+    @app_commands.describe(query="Enter a search query")
+    async def search(self, interaction: discord.Interaction, query: str) -> None:
+        ''' Search across artists, titles and tracks, limiting the number of artist and album results '''
+        await self.search_ui(interaction, query, f"**Search Results:** {query}", 2, 3, None)
+
+    @app_commands.command(name="search-song", description="Search for a track")
+    @app_commands.describe(query="Enter a search query")
+    async def search_song(self, interaction: discord.Interaction, query: str) -> None:
+        ''' Search for a track and list results '''
+        await self.search_ui(interaction, query, f"**Track Search:** {query}", 0, 0, None)
+
+    @app_commands.command(name="search-album", description="Search for an album")
+    @app_commands.describe(query="Enter a search query")
+    async def search_album(self, interaction: discord.Interaction, query: str) -> None:
+        ''' Search for albums and list results '''
+        await self.search_ui(interaction, query, f"**Album Search:** {query}", 0, None, 0)
+
+    @app_commands.command(name="search-artist", description="Search for an artist")
+    @app_commands.describe(query="Enter a search query")
+    async def search_artist(self, interaction: discord.Interaction, query: str) -> None:
+        ''' Search for artists and list results '''
+        await self.search_ui(interaction, query, f"**Artist Search:** {query}", None, 0, 0)
 
 
     @app_commands.command(name="stop", description="Stop playing the current track")

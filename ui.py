@@ -6,6 +6,8 @@ import data
 import subsonic
 import logging
 
+from typing import Union
+
 logger = logging.getLogger(__name__)
 
 
@@ -130,77 +132,54 @@ class ErrMsg:
 
 
 
-# Methods for parsing data to Discord structures
-def parse_search_as_track_selection_embed(results: list[subsonic.Song], query: str, page_num: int) -> discord.Embed:
-    ''' Takes search results obtained from the Subsonic API and parses them into a Discord embed suitable for track selection '''
-
+def parse_subsonic_items_as_selection_embed(items: list[Union[subsonic.Song, subsonic.Album, subsonic.Artist]], header: str, footer: str) -> list[discord.SelectOption]:
+    ''' Takes a list of items from the Subsonic API and parses them into a Discord embed suitable for selection '''
     options_str = ""
 
-    # Loop over the provided search results
-    for song in results:
+    for item in items:
+        if isinstance(item, subsonic.Song):
+            # Trim displayed tags to fit neatly within the embed
+            tr_title = item.title
+            tr_artist = item.artist
+            tr_album = (item.album[:68] + "...") if len(item.album) > 68 else item.album
 
-        # Trim displayed tags to fit neatly within the embed
-        tr_title = song.title
-        tr_artist = song.artist
-        tr_album = (song.album[:68] + "...") if len(song.album) > 68 else song.album
+            # Only trim the longest tag on the first line
+            top_str_length = len(item.title + " - " + item.artist)
+            if top_str_length > 71:
+                
+                if tr_title > tr_artist:
+                    tr_title = item.title[:(68 - top_str_length)] + '...'
+                else:
+                    tr_artist = item.artist[:(68 - top_str_length)] + '...'
 
-        # Only trim the longest tag on the first line
-        top_str_length = len(song.title + " - " + song.artist)
-        if top_str_length > 71:
-            
-            if tr_title > tr_artist:
-                tr_title = song.title[:(68 - top_str_length)] + '...'
-            else:
-                tr_artist = song.artist[:(68 - top_str_length)] + '...'
+            # Add each of the results to our output string
+            options_str += f"**{tr_title}** - *{tr_artist}* \n*{tr_album}* ({item.duration_printable})\n\n"
+        if isinstance(item, subsonic.Album):
+            options_str += f"**{item.name}**\n*{item.artist}* ({item.song_count} tracks, {item.duration_printable})\n\n"
+        if isinstance(item, subsonic.Artist):
+            options_str += f"**{item.name}**\n{item.album_count} albums\n\n"
 
-        # Add each of the results to our output string
-        options_str += f"**{tr_title}** - *{tr_artist}* \n*{tr_album}* ({song.duration_printable})\n\n"
+    # Append the footer
+    options_str += footer
 
-    # Add the current page number to our results
-    options_str += f"Current page: {page_num}"
+    # Return a discord embed for the items
+    return discord.Embed(color=discord.Color.orange(), title=header, description=options_str)
 
-    # Return an embed that displays our output string
-    return discord.Embed(color=discord.Color.orange(), title=f"Results for: {query}", description=options_str)
-
-
-def parse_search_as_track_selection_options(results: list[subsonic.Song]) -> list[discord.SelectOption]:
-    ''' Takes search results obtained from the Subsonic API and parses them into a Discord selection list for tracks '''
-
+def parse_subsonic_items_as_selection_options(items: list[Union[subsonic.Song, subsonic.Album, subsonic.Artist]]) -> list[discord.SelectOption]:
+    ''' Takes a list of items from the Subsonic API and parses them into a Discord selection list '''
     select_options = []
-    for i, song in enumerate(results):
-        select_option = discord.SelectOption(label=f"{song.title}", description=f"by {song.artist}", value=i)
+    for i, item in enumerate(items):
+        select_label = ""
+        select_desc = ""
+        if isinstance(item, subsonic.Song):
+            select_label = item.title
+            select_desc = f"song by {item.artist}"
+        if isinstance(item, subsonic.Album):
+            select_label = item.name
+            select_desc = f"album by {item.artist}"
+        if isinstance(item, subsonic.Artist):
+            select_label = item.name
+            select_desc = f"artist"
+        select_option = discord.SelectOption(label=select_label, description=select_desc, value=i)
         select_options.append(select_option)
-
-    return select_options
-
-# Methods for parsing data to Discord structures
-def parse_album_search_as_track_selection_embed(results: list[subsonic.Album], query: str, page_num: int) -> discord.Embed:
-    ''' Takes search results obtained from the Subsonic API and parses them into a Discord embed suitable for track selection '''
-
-    options_str = ""
-
-    # Loop over the provided search results
-    for album in results:
-
-        a_name = album.name
-        a_artist = album.artist
-
-        # Add each of the results to our output string
-        options_str += f"**{a_name}**\n*{a_artist}* ({album.song_count} tracks, {album.duration_printable})\n\n"
-
-    # Add the current page number to our results
-    options_str += f"Current page: {page_num}"
-
-    # Return an embed that displays our output string
-    return discord.Embed(color=discord.Color.orange(), title=f"Results for: {query}", description=options_str)
-
-
-def parse_album_search_as_track_selection_options(results: list[subsonic.Album]) -> list[discord.SelectOption]:
-    ''' Takes search results obtained from the Subsonic API and parses them into a Discord selection list for tracks '''
-
-    select_options = []
-    for i, album in enumerate(results):
-        select_option = discord.SelectOption(label=f"{album.name}", description=f"by {album.artist}", value=i)
-        select_options.append(select_option)
-
     return select_options
