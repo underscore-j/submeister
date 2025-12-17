@@ -65,7 +65,26 @@ class Player():
         # Get the stream from the Subsonic server, using the provided song's ID
         ffmpeg_options = {"before_options": "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5",
                            "options": "-filter:a volume=replaygain=track"}
-        audio_src = discord.FFmpegOpusAudio(subsonic.stream(song.song_id), **ffmpeg_options)
+
+        # Try three times to obtain the stream as an audio source
+        # (This is a workaround for servers which intermittently return code 401)
+        retry_count = 0
+        audio_src=None
+        while retry_count < 3:
+            try:
+                audio_src = discord.FFmpegOpusAudio(subsonic.stream(song.song_id), **ffmpeg_options)
+                break
+            except:
+                retry_count += 1
+
+        if audio_src is None:
+            try:
+                await ui.SysMsg.msg(interaction.channel, f"Skipping *{song.artist}* - **{song.title}**: Failed to obtain stream.")
+            except:
+                pass
+            await self.play_audio_queue(interaction, voice_client)
+            return
+
         # audio_src.read()
 
         # Update the currently playing song, and reset the duration
@@ -73,7 +92,10 @@ class Player():
         self.current_position = 0
 
         # Let the user know the track will play
-        await ui.SysMsg.playing(interaction)
+        try:
+            await ui.SysMsg.playing(interaction.channel, song)
+        except:
+            pass
 
         # TODO: Start a duration timer
 
@@ -82,7 +104,8 @@ class Player():
 
         # TODO: probably should handle error
         def playback_finished(error):
-            self.handle_autoplay(interaction, self.current_song.song_id)
+            print("playback_finished was called", flush=True)
+            # asyncio.run_coroutine_threadsafe(self.handle_autoplay(interaction, self.current_song.song_id), loop)
             asyncio.run_coroutine_threadsafe(self.play_audio_queue(interaction, voice_client), loop)
 
         voice_client.play(audio_src, after=playback_finished)
@@ -112,7 +135,7 @@ class Player():
 
         # If there's no match, throw an error
         if len(songs) == 0:
-            await ui.ErrMsg.msg(interaction, "Failed to obtain a song for autoplay.")
+            await ui.SysMsg.msg(interaction.channel, "Failed to obtain a song for autoplay.")
             return
         
         self.queue.append(songs[0])
@@ -131,6 +154,7 @@ class Player():
         
         # Check if the bot is already playing something
         if voice_client.is_playing():
+            print("not playing because player is already playing", flush=True)
             return
 
         await self.handle_autoplay(interaction)
@@ -147,4 +171,4 @@ class Player():
             
 
         # If the queue is empty, playback has ended; we should let the user know
-        await ui.SysMsg.playback_ended(interaction)
+        await ui.SysMsg.playback_ended(interaction.channel)

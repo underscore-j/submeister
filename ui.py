@@ -16,6 +16,42 @@ class SysMsg:
     ''' A class for sending system messages '''
 
     @staticmethod
+    async def msg(messageable: discord.abc.Messageable, header: str, message: str=None, thumbnail: str=None) -> None:
+        ''' Generic message function. Creates a message formatted as an embed '''
+
+        embed = discord.Embed(color=discord.Color.orange(), title=header, description=message)
+        file = discord.utils.MISSING
+
+        # Attach a thumbnail if one was provided (as a local file)
+        if thumbnail is not None:
+            file = discord.File(thumbnail, filename="image.png")
+            embed.set_thumbnail(url="attachment://image.png")
+
+        # Attempt to send the message, up to 3 times
+        attempt = 0
+        while attempt < 3:
+            try:
+                await messageable.send(file=file, embed=embed, silent = True)
+                return
+            except discord.NotFound:
+                logger.warning("Attempt %d at sending a system message failed...", attempt+1)
+                attempt += 1
+
+    @staticmethod
+    async def playing(messageable: discord.abc.Messageable, song: subsonic.Song) -> None:
+        ''' Sends a message containing the currently playing song '''
+        cover_art = subsonic.get_album_art_file(song.cover_id)
+        desc = f"**{song.title}** - *{song.artist}*\n{song.album} ({song.duration_printable})"
+        await __class__.msg(messageable, "Playing:", desc, cover_art)
+
+    @staticmethod
+    async def playback_ended(messageable: discord.abc.Messageable) -> None:
+        ''' Sends a message indicating playback has ended '''
+        await __class__.msg(messageable, "Playback ended")
+
+class CmdRsp:
+    ''' A class for sending basic responses to slash commands '''
+    @staticmethod
     async def msg(interaction: discord.Interaction, header: str, message: str=None, thumbnail: str=None) -> None:
         ''' Generic message function. Creates a message formatted as an embed '''
 
@@ -37,28 +73,8 @@ class SysMsg:
                     await interaction.response.send_message(file=file, embed=embed)
                 return
             except discord.NotFound:
-                logger.warning("Attempt %d at sending a system message failed...", attempt+1)
+                logger.warning("Attempt %d at sending a command response failed...", attempt+1)
                 attempt += 1
-
-
-    @staticmethod
-    async def playing(interaction: discord.Interaction) -> None:
-        ''' Sends a message containing the currently playing song '''
-        player = data.guild_data(interaction.guild_id).player
-        song = player.current_song
-        cover_art = subsonic.get_album_art_file(song.cover_id)
-        desc = f"**{song.title}** - *{song.artist}*\n{song.album} ({song.duration_printable})"
-        await __class__.msg(interaction, "Playing:", desc, cover_art)
-
-    @staticmethod
-    async def playback_ended(interaction: discord.Interaction) -> None:
-        ''' Sends a message indicating playback has ended '''
-        await __class__.msg(interaction, "Playback ended")
-
-    @staticmethod
-    async def disconnected(interaction: discord.Interaction) -> None:
-        ''' Sends a message indicating the bot disconnected from voice channel '''
-        await __class__.msg(interaction, "Disconnected from voice channel")
 
     @staticmethod
     async def starting_queue_playback(interaction: discord.Interaction) -> None:
@@ -86,9 +102,13 @@ class SysMsg:
         ''' Sends a message indicating the current song was skipped '''
         await __class__.msg(interaction, "Skipped track")
 
+    @staticmethod
+    async def disconnected(interaction: discord.Interaction) -> None:
+        ''' Sends a message indicating the bot disconnected from voice channel '''
+        await __class__.msg(interaction, "Disconnected from voice channel")
 
-class ErrMsg:
-    ''' A class for sending error messages '''
+class CmdErr:
+    ''' A class for sending error messages in response to slash commands '''
 
     @staticmethod
     async def msg(interaction: discord.Interaction, message: str) -> None:

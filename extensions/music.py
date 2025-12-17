@@ -36,7 +36,7 @@ class MusicCog(commands.Cog):
             try:
                 voice_client = await interaction.user.voice.channel.connect()
             except AttributeError:
-                await ui.ErrMsg.cannot_connect_to_voice_channel(interaction)
+                await ui.CmdErr.cannot_connect_to_voice_channel(interaction)
 
         return voice_client
 
@@ -48,14 +48,14 @@ class MusicCog(commands.Cog):
         # Check if user is in voice channel
         print(interaction.user.voice)
         if interaction.user.voice is None:
-            return await ui.ErrMsg.user_not_in_voice_channel(interaction)
+            return await ui.CmdErr.user_not_in_voice_channel(interaction)
 
         # Get a valid voice channel connection
         voice_client = await self.get_voice_client(interaction, should_connect=True)
 
         # Don't attempt playback if the bot is already playing
         if voice_client.is_playing() and query is None:
-            return await ui.ErrMsg.already_playing(interaction)
+            return await ui.CmdErr.already_playing(interaction)
 
         # Get the guild's player
         player = data.guild_data(interaction.guild_id).player
@@ -65,10 +65,10 @@ class MusicCog(commands.Cog):
 
             # Display error if queue is empty & autoplay is disabled
             if player.queue == [] and data.guild_properties(interaction.guild_id).autoplay_mode == data.AutoplayMode.NONE:
-                return await ui.ErrMsg.queue_is_empty(interaction)
+                return await ui.CmdErr.queue_is_empty(interaction)
 
             # Begin playback of queue
-            await ui.SysMsg.starting_queue_playback(interaction)
+            await ui.CmdRsp.starting_queue_playback(interaction)
             await player.play_audio_queue(interaction, voice_client)
             return
 
@@ -77,13 +77,13 @@ class MusicCog(commands.Cog):
 
         # Display an error if the query returned no results
         if len(songs) == 0:
-            await ui.ErrMsg.msg(interaction, f"No result found for **{query}**.")
+            await ui.CmdErr.msg(interaction, f"No result found for **{query}**.")
             return
         
         # Add the first result to the queue and handle queue playback
         player.queue.append(songs[0])
 
-        await ui.SysMsg.added_to_queue(interaction, songs[0])
+        await ui.CmdRsp.added_to_queue(interaction, songs[0])
         await player.play_audio_queue(interaction, voice_client)
 
     class SelectionHandler:
@@ -102,7 +102,7 @@ class MusicCog(commands.Cog):
 
                 # Don't allow users who aren't in a voice channel with the bot to queue tracks
                 if voice_client is not None and interaction.user.status is None:
-                    return await ui.ErrMsg.user_not_in_voice_channel(interaction)
+                    return await ui.CmdErr.user_not_in_voice_channel(interaction)
 
                 # Get the guild's player
                 player = data.guild_data(interaction.guild_id).player
@@ -111,7 +111,7 @@ class MusicCog(commands.Cog):
                 player.queue.append(item)
 
                 # Let the user know a track has been added to the queue
-                await ui.SysMsg.added_to_queue(interaction, item)
+                await ui.CmdRsp.added_to_queue(interaction, item)
 
                 # Fetch the cover art in advance
                 subsonic.get_album_art_file(item.cover_id)
@@ -134,7 +134,7 @@ class MusicCog(commands.Cog):
 
         # Dispaly an error if we obtain no results
         if len(songs) == 0:
-            await ui.ErrMsg.msg(interaction, f"No tracks found for album **{album.name}")
+            await ui.CmdErr.msg(interaction, f"No tracks found for album **{album.name}")
             return
 
         # Create a view for our response
@@ -160,7 +160,7 @@ class MusicCog(commands.Cog):
 
             # Don't allow users who aren't in a voice channel with the bot to queue tracks
             if voice_client is not None and interaction.user.status is None:
-                return await ui.ErrMsg.user_not_in_voice_channel(interaction)
+                return await ui.CmdErr.user_not_in_voice_channel(interaction)
 
             # Get the guild's player
             player = data.guild_data(interaction.guild_id).player
@@ -170,7 +170,7 @@ class MusicCog(commands.Cog):
                 player.queue.append(song)
 
             # Let the user know a track has been added to the queue
-            await ui.SysMsg.added_album_to_queue(interaction, album)
+            await ui.CmdRsp.added_album_to_queue(interaction, album)
 
             # Fetch the cover art in advance
             subsonic.get_album_art_file(album.cover_id)
@@ -193,7 +193,7 @@ class MusicCog(commands.Cog):
 
         # Dispaly an error if we obtain no results
         if len(albums) == 0:
-            await ui.ErrMsg.msg(interaction, f"No albums found for artist **{artist.name}")
+            await ui.CmdErr.msg(interaction, f"No albums found for artist **{artist.name}")
             return
 
         # Create a view for our response
@@ -219,7 +219,7 @@ class MusicCog(commands.Cog):
 
             # Don't allow users who aren't in a voice channel with the bot to queue tracks
             if voice_client is not None and interaction.user.status is None:
-                return await ui.ErrMsg.user_not_in_voice_channel(interaction)
+                return await ui.CmdErr.user_not_in_voice_channel(interaction)
 
             # Get the guild's player
             player = data.guild_data(interaction.guild_id).player
@@ -228,7 +228,7 @@ class MusicCog(commands.Cog):
             for album in albums:
                 for song in subsonic.get_album_songs(album):
                     player.queue.append(song)
-                await ui.SysMsg.added_album_to_queue(interaction, album)
+                await ui.CmdRsp.added_album_to_queue(interaction, album)
                 subsonic.get_album_art_file(album.cover_id)
 
             # Attempt to play the audio queue, if the bot is in the voice channel
@@ -380,14 +380,14 @@ class MusicCog(commands.Cog):
 
         # Check if our voice client is connected
         if voice_client is None:
-            await ui.ErrMsg.bot_not_in_voice_channel(interaction)
+            await ui.CmdErr.bot_not_in_voice_channel(interaction)
             return
 
         # Disconnect the voice client
         await interaction.guild.voice_client.disconnect()
 
         # Display disconnect confirmation
-        await ui.SysMsg.disconnected(interaction)
+        await ui.CmdRsp.disconnected(interaction)
 
 
     @app_commands.command(name="show-queue", description="View the current queue")
@@ -409,7 +409,7 @@ class MusicCog(commands.Cog):
             output = "Queue is empty!"
 
         # Show the user their queue
-        await ui.SysMsg.msg(interaction, "Queue", output)
+        await ui.CmdRsp.msg(interaction, "Queue", output)
 
 
     @app_commands.command(name="clear-queue", description="Clear the queue")
@@ -419,7 +419,7 @@ class MusicCog(commands.Cog):
         queue.clear()
 
         # Let the user know that the queue has been cleared
-        await ui.SysMsg.queue_cleared(interaction)
+        await ui.CmdRsp.queue_cleared(interaction)
 
 
     @app_commands.command(name="skip", description="Skip the current track")
@@ -431,19 +431,19 @@ class MusicCog(commands.Cog):
 
         # Check if the bot is connected to a voice channel
         if voice_client is None:
-            await ui.ErrMsg.bot_not_in_voice_channel(interaction)
+            await ui.CmdErr.bot_not_in_voice_channel(interaction)
             return
 
         # Check if the bot is playing music
         if not voice_client.is_playing():
-            await ui.ErrMsg.not_playing(interaction)
+            await ui.CmdErr.not_playing(interaction)
             return
 
         # Stop the current song
         voice_client.stop()
 
         # Display confirmation message
-        await ui.SysMsg.skipping(interaction)
+        await ui.CmdRsp.skipping(interaction)
 
 
     @app_commands.command(name="autoplay", description="Toggles autoplay")
@@ -467,9 +467,9 @@ class MusicCog(commands.Cog):
 
         # Display message indicating new status of autoplay
         if mode.value == "none":
-            await ui.SysMsg.msg(interaction, f"Autoplay disabled by {interaction.user.display_name}")
+            await ui.CmdRsp.msg(interaction, f"Autoplay disabled by {interaction.user.display_name}")
         else:
-            await ui.SysMsg.msg(interaction, f"Autoplay enabled by {interaction.user.display_name}", f"Autoplay mode: **{mode.name}**")
+            await ui.CmdRsp.msg(interaction, f"Autoplay enabled by {interaction.user.display_name}", f"Autoplay mode: **{mode.name}**")
 
         # If the bot is connected to a voice channel and autoplay is enabled, start queue playback
         voice_client = await self.get_voice_client(interaction)
