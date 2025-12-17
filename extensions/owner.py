@@ -106,6 +106,17 @@ class OwnerCog(commands.GroupCog, group_name="owner"):
             logger.info("Extension '%s' loaded successfully.", extension)
             await interaction.edit_original_response(content=f"Extension `{extension}` loaded successfully.")
 
+    @app_commands.command(name="sync-slash-commands")
+    async def sync_slash_commands(self, interaction: discord.Interaction):
+        ''' Synchronizes Slash commands globally, i.e. with guilds other than the test guild '''
+
+        if not await self.is_owner(interaction):
+            return
+        
+        await interaction.response.send_message(content="Synchronizing commands...")
+        await self.bot.tree.sync()
+        await interaction.edit_original_response(content="Synchronized commands.")
+
 async def setup(bot: SubmeisterClient):
     '''Setup function for the owner.py cog'''
 
