@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools >= 77.0.3"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "submeister"
+version = "0.dev"
+description = "discord subsonic bot"
+readme = "README.md"
+license = "GPL-3.0-only"
+dependencies = [
+    'discord.py',
+    'requests',
+    'python-dotenv',
+    'pynacl'
+]
+
+[project.scripts]
+submeister = 'submeister:run'

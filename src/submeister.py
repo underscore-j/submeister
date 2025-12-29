@@ -18,30 +18,29 @@ class SubmeisterClient(commands.Bot):
 
     test_guild: int
 
-    def __init__(self, test_guild: int=None) -> None:
+    def __init__(self, logger, test_guild: int=None) -> None:
         self.test_guild = test_guild
+        self.logger = logger
 
         super().__init__(command_prefix=commands.when_mentioned, intents=discord.Intents.all())
 
     async def load_extensions(self) -> None:
         ''' Auto-loads all extensions present within the `./extensions` directory. '''
 
-        for file in os.listdir("./extensions"):
-            if file.endswith(".py"):
-                ext_name = file[:-3]
+        for ext_name in ["music", "owner"]:
                 try:
                     await self.load_extension(f"extensions.{ext_name}")
                 except commands.errors.ExtensionError as err:
                     if isinstance(err, commands.errors.ExtensionNotFound):
-                        logger.warning("Failed to load extension '%s'. Extension was not found.", ext_name)
+                        self.logger.warning("Failed to load extension '%s'. Extension was not found.", ext_name)
                     if isinstance(err, commands.errors.ExtensionAlreadyLoaded):
-                        logger.warning("Failed to load extension '%s'. Extension was already loaded.", ext_name)
+                        self.logger.warning("Failed to load extension '%s'. Extension was already loaded.", ext_name)
                     if isinstance(err, commands.errors.NoEntryPointError):
-                        logger.error("Failed to load extension '%s'. No entry point was found in the file.", ext_name, exc_info=err)
+                        self.logger.error("Failed to load extension '%s'. No entry point was found in the file.", ext_name, exc_info=err)
                     if isinstance(err, commands.errors.ExtensionFailed):
-                        logger.error("Failed to load extension '%s'. Extension setup failed.", ext_name, exc_info=err)
+                        self.logger.error("Failed to load extension '%s'. Extension setup failed.", ext_name, exc_info=err)
                 else:
-                    logger.info("Extension '%s' loaded successfully.", ext_name)
+                    self.logger.info("Extension '%s' loaded successfully.", ext_name)
 
     async def sync_command_tree(self) -> None:
         ''' Synchronizes the command tree with the guild used for testing. '''
@@ -61,19 +60,20 @@ class SubmeisterClient(commands.Bot):
     async def on_ready(self) -> None:
         ''' Event called when the client is done preparing. '''
 
-        logger.info("Logged as: %s | Connected Guilds: %s | Loaded Extensions: %s", self.user, len(self.guilds), list(self.extensions))
+        self.logger.info("Logged as: %s | Connected Guilds: %s | Loaded Extensions: %s", self.user, len(self.guilds), list(self.extensions))
 
-if __name__ == "__main__":
-    logs.setup_logging()
-    logger = logging.getLogger(__name__)
-
-    data.load_guild_properties_from_disk()
-
-    client = SubmeisterClient(test_guild=env.DISCORD_TEST_GUILD)
-    client.run(env.DISCORD_BOT_TOKEN, log_handler=None)
-
-@atexit.register
 def exit_handler():
     ''' Function ran on application exit. '''
 
     data.save_guild_properties_to_disk()
+
+def run():
+    logs.setup_logging()
+    logger = logging.getLogger(__name__)
+
+    data.load_guild_properties_from_disk()
+    atexit.register(exit_handler)
+
+    client = SubmeisterClient(logger, test_guild=env.DISCORD_TEST_GUILD)
+    client.run(env.DISCORD_BOT_TOKEN, log_handler=None)
+
